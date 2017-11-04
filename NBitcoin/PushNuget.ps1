@@ -1,17 +1,6 @@
-del *.nupkg
-&("C:\Program Files (x86)\MSBuild\14.0\Bin\MSBuild.exe") "..\NBitcoin\NBitcoin.csproj" -p:Configuration=Release
-cd ..\NBitcoin.NETCore
-dotnet restore
-dotnet build -c Release
-cd ..\NBitcoin
-&("C:\Program Files (x86)\MSBuild\14.0\Bin\MSBuild.exe") "..\Build\Deploy.csproj"
-
-.\GitLink.exe ".." -ignore "nbitcoin.portable.tests,common,nbitcoin.tests,build"
-
-nuGet pack NBitcoin.nuspec
-
-forfiles /m *.nupkg /c "cmd /c NuGet.exe push @FILE -source https://api.nuget.org/v3/index.json"
-(((dir *.nupkg).Name) -match "[0-9]+?\.[0-9]+?\.[0-9]+?\.[0-9]+")
-$ver = $Matches.Item(0)
+rm "bin\release\" -Recurse -Force
+dotnet pack --configuration Release
+dotnet nuget push "bin\Release\" --source "https://api.nuget.org/v3/index.json"
+$ver = ((ls .\bin\release\*.nupkg)[0].Name -replace '[^\.]*\.(\d+(\.\d+){1,3}).*', '$1')
 git tag -a "v$ver" -m "$ver"
 git push --tags

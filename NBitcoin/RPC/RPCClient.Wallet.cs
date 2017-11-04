@@ -115,7 +115,7 @@ namespace NBitcoin.RPC
 		wallet			 signmessage
 		wallet			 walletlock
 		wallet			 walletpassphrasechange
-		wallet			 walletpassphrase
+		wallet			 walletpassphrase			yes
 	*/
 	public partial class RPCClient
 	{
@@ -123,14 +123,14 @@ namespace NBitcoin.RPC
 
 		public void BackupWallet(string path)
 		{
-			if (string.IsNullOrEmpty(path))
+			if(string.IsNullOrEmpty(path))
 				throw new ArgumentNullException("path");
 			SendCommand("backupwallet", path);
 		}
 
 		public async Task BackupWalletAsync(string path)
 		{
-			if (string.IsNullOrEmpty(path))
+			if(string.IsNullOrEmpty(path))
 				throw new ArgumentNullException("path");
 			await SendCommandAsync("backupwallet", path).ConfigureAwait(false);
 		}
@@ -141,13 +141,13 @@ namespace NBitcoin.RPC
 		public BitcoinSecret DumpPrivKey(BitcoinAddress address)
 		{
 			var response = SendCommand("dumpprivkey", address.ToString());
-			return Network.CreateFromBase58Data<BitcoinSecret>((string)response.Result);
+			return Network.Parse<BitcoinSecret>((string)response.Result);
 		}
 
 		public async Task<BitcoinSecret> DumpPrivKeyAsync(BitcoinAddress address)
 		{
 			var response = await SendCommandAsync("dumpprivkey", address.ToString()).ConfigureAwait(false);
-			return Network.CreateFromBase58Data<BitcoinSecret>((string)response.Result);
+			return Network.Parse<BitcoinSecret>((string)response.Result);
 		}
 
 
@@ -156,13 +156,13 @@ namespace NBitcoin.RPC
 		public BitcoinAddress GetAccountAddress(string account)
 		{
 			var response = SendCommand("getaccountaddress", account);
-			return Network.CreateFromBase58Data<BitcoinAddress>((string)response.Result);
+			return Network.Parse<BitcoinAddress>((string)response.Result);
 		}
 
 		public async Task<BitcoinAddress> GetAccountAddressAsync(string account)
 		{
 			var response = await SendCommandAsync("getaccountaddress", account).ConfigureAwait(false);
-			return Network.CreateFromBase58Data<BitcoinAddress>((string)response.Result);
+			return Network.Parse<BitcoinAddress>((string)response.Result);
 		}
 
 		public BitcoinSecret GetAccountSecret(string account)
@@ -194,13 +194,35 @@ namespace NBitcoin.RPC
 		public IEnumerable<BitcoinAddress> GetAddressesByAccount(string account)
 		{
 			var response = SendCommand(RPCOperations.getaddressesbyaccount, account);
-			return response.Result.Select(t => Network.CreateFromBase58Data<BitcoinAddress>((string)t));
+			return response.Result.Select(t => Network.Parse<BitcoinAddress>((string)t));
 		}
 
 		public FundRawTransactionResponse FundRawTransaction(Transaction transaction, FundRawTransactionOptions options = null)
 		{
 			return FundRawTransactionAsync(transaction, options).GetAwaiter().GetResult();
 		}
+
+		public Money GetBalance(int minConf, bool includeWatchOnly)
+		{
+			return GetBalanceAsync(minConf, includeWatchOnly).GetAwaiter().GetResult();
+		}
+		public Money GetBalance()
+		{
+			return GetBalanceAsync().GetAwaiter().GetResult();
+		}
+
+		public async Task<Money> GetBalanceAsync()
+		{
+			var data = await SendCommandAsync(RPCOperations.getbalance, "*").ConfigureAwait(false);
+			return Money.Coins(data.Result.Value<decimal>());
+		}
+
+		public async Task<Money> GetBalanceAsync(int minConf, bool includeWatchOnly)
+		{
+			var data = await SendCommandAsync(RPCOperations.getbalance, "*", minConf, includeWatchOnly).ConfigureAwait(false);
+			return Money.Coins(data.Result.Value<decimal>());
+		}
+
 		public async Task<FundRawTransactionResponse> FundRawTransactionAsync(Transaction transaction, FundRawTransactionOptions options = null)
 		{
 			if(transaction == null)
@@ -265,7 +287,19 @@ namespace NBitcoin.RPC
 		/// <returns>The number of bitcoins received by the address, excluding coinbase transactions. May be 0.</returns>
 		public Money GetReceivedByAddress(BitcoinAddress address)
 		{
-			var response = SendCommand(RPCOperations.getreceivedbyaddress, address.ToWif());
+			var response = SendCommand(RPCOperations.getreceivedbyaddress, address.ToString());
+			return Money.Coins(response.Result.Value<decimal>());
+		}
+
+		/// <summary>
+		/// Returns the total amount received by the specified address in transactions with at 
+		/// least one (default) confirmations. It does not count coinbase transactions.
+		/// </summary>
+		/// <param name="address">The address whose transactions should be tallied.</param>
+		/// <returns>The number of bitcoins received by the address, excluding coinbase transactions. May be 0.</returns>
+		public async Task<Money> GetReceivedByAddressAsync(BitcoinAddress address)
+		{
+			var response = await SendCommandAsync(RPCOperations.getreceivedbyaddress, address.ToString()).ConfigureAwait(false);
 			return Money.Coins(response.Result.Value<decimal>());
 		}
 
@@ -283,7 +317,25 @@ namespace NBitcoin.RPC
 		/// <returns>The number of bitcoins received by the address, excluding coinbase transactions. May be 0.</returns>
 		public Money GetReceivedByAddress(BitcoinAddress address, int confirmations)
 		{
-			var response = SendCommand(RPCOperations.getreceivedbyaddress, address.ToWif(), confirmations);
+			var response = SendCommand(RPCOperations.getreceivedbyaddress, address.ToString(), confirmations);
+			return Money.Coins(response.Result.Value<decimal>());
+		}
+
+		/// <summary>
+		/// Returns the total amount received by the specified address in transactions with the 
+		/// specified number of confirmations. It does not count coinbase transactions.
+		/// </summary>
+		/// <param name="confirmations">
+		/// The minimum number of confirmations an externally-generated transaction must have before 
+		/// it is counted towards the balance. Transactions generated by this node are counted immediately. 
+		/// Typically, externally-generated transactions are payments to this wallet and transactions 
+		/// generated by this node are payments to other wallets. Use 0 to count unconfirmed transactions. 
+		/// Default is 1.
+		/// </param>
+		/// <returns>The number of bitcoins received by the address, excluding coinbase transactions. May be 0.</returns>
+		public async Task<Money> GetReceivedByAddressAsync(BitcoinAddress address, int confirmations)
+		{
+			var response = await SendCommandAsync(RPCOperations.getreceivedbyaddress, address.ToString(), confirmations).ConfigureAwait(false);
 			return Money.Coins(response.Result.Value<decimal>());
 		}
 
@@ -313,14 +365,34 @@ namespace NBitcoin.RPC
 
 		// importaddress
 
-		public void ImportAddress(BitcoinAddress address)
+		public void ImportAddress(IDestination address)
 		{
-			SendCommand("importaddress", address.ToString());
+			SendCommand("importaddress", address.ScriptPubKey.ToHex());
 		}
 
-		public void ImportAddress(BitcoinAddress address, string label, bool rescan)
+		public void ImportAddress(IDestination address, string label, bool rescan)
 		{
-			SendCommand("importaddress", address.ToString(), label, rescan);
+			SendCommand("importaddress", address.ScriptPubKey.ToHex(), label, rescan);
+		}
+
+		public void ImportAddress(Script scriptPubKey)
+		{
+			SendCommand("importaddress", scriptPubKey.ToHex());
+		}
+
+		public void ImportAddress(Script scriptPubKey, string label, bool rescan)
+		{
+			SendCommand("importaddress", scriptPubKey.ToHex(), label, rescan);
+		}
+
+		public async Task ImportAddressAsync(Script scriptPubKey)
+		{
+			await SendCommandAsync("importaddress", scriptPubKey.ToHex()).ConfigureAwait(false);
+		}
+
+		public async Task ImportAddressAsync(Script scriptPubKey, string label, bool rescan)
+		{
+			await SendCommandAsync("importaddress", scriptPubKey.ToHex(), label, rescan).ConfigureAwait(false);
 		}
 
 		public async Task ImportAddressAsync(BitcoinAddress address)
@@ -395,7 +467,7 @@ namespace NBitcoin.RPC
 		private IEnumerable<RPCAccount> AsRPCAccount(RPCResponse response)
 		{
 			var obj = (JObject)response.Result;
-			foreach (var prop in obj.Properties())
+			foreach(var prop in obj.Properties())
 			{
 				yield return new RPCAccount()
 				{
@@ -412,14 +484,14 @@ namespace NBitcoin.RPC
 		{
 			var result = SendCommand(RPCOperations.listaddressgroupings);
 			var array = (JArray)result.Result;
-			foreach (var group in array.Children<JArray>())
+			foreach(var group in array.Children<JArray>())
 			{
 				var grouping = new AddressGrouping();
 				grouping.PublicAddress = BitcoinAddress.Create(group[0][0].ToString());
 				grouping.Amount = Money.Coins(group[0][1].Value<decimal>());
 				grouping.Account = group[0].Count() > 2 ? group[0][2].ToString() : null;
 
-				foreach (var subgroup in group.Skip(1))
+				foreach(var subgroup in group.Skip(1))
 				{
 					var change = new ChangeAddress();
 					change.Address = BitcoinAddress.Create(subgroup[0].ToString());
@@ -433,10 +505,10 @@ namespace NBitcoin.RPC
 
 		public IEnumerable<BitcoinSecret> ListSecrets()
 		{
-			foreach (var grouping in ListAddressGroupings())
+			foreach(var grouping in ListAddressGroupings())
 			{
 				yield return DumpPrivKey(grouping.PublicAddress);
-				foreach (var change in grouping.ChangeAddresses)
+				foreach(var change in grouping.ChangeAddresses)
 					yield return DumpPrivKey(change.Address);
 			}
 		}
@@ -456,7 +528,7 @@ namespace NBitcoin.RPC
 		public UnspentCoin[] ListUnspent()
 		{
 			var response = SendCommand("listunspent");
-			return response.Result.Select(i => new UnspentCoin((JObject)i)).ToArray();
+			return response.Result.Select(i => new UnspentCoin((JObject)i, Network)).ToArray();
 		}
 
 		/// <summary>
@@ -468,16 +540,16 @@ namespace NBitcoin.RPC
 		{
 			var addr = from a in addresses select a.ToString();
 			var response = SendCommand("listunspent", minconf, maxconf, addr.ToArray());
-			return response.Result.Select(i => new UnspentCoin((JObject)i)).ToArray();
+			return response.Result.Select(i => new UnspentCoin((JObject)i, Network)).ToArray();
 		}
-		
+
 		/// <summary>
 		/// Returns an array of unspent transaction outputs belonging to this wallet. 
 		/// </summary>
 		public async Task<UnspentCoin[]> ListUnspentAsync()
 		{
 			var response = await SendCommandAsync("listunspent").ConfigureAwait(false);
-			return response.Result.Select(i => new UnspentCoin((JObject)i)).ToArray();
+			return response.Result.Select(i => new UnspentCoin((JObject)i, Network)).ToArray();
 		}
 
 		/// <summary>
@@ -489,7 +561,7 @@ namespace NBitcoin.RPC
 		{
 			var addr = from a in addresses select a.ToString();
 			var response = await SendCommandAsync("listunspent", minconf, maxconf, addr.ToArray()).ConfigureAwait(false);
-			return response.Result.Select(i => new UnspentCoin((JObject)i)).ToArray();
+			return response.Result.Select(i => new UnspentCoin((JObject)i, Network)).ToArray();
 		}
 
 		//listlockunspent
@@ -535,7 +607,7 @@ namespace NBitcoin.RPC
 			{
 				LockUnspentCoreAsync(unlock, outpoints).Wait();
 			}
-			catch (AggregateException ex)
+			catch(AggregateException ex)
 			{
 				ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
 			}
@@ -543,13 +615,13 @@ namespace NBitcoin.RPC
 
 		private async Task LockUnspentCoreAsync(bool unlock, OutPoint[] outpoints)
 		{
-			if (outpoints == null || outpoints.Length == 0)
+			if(outpoints == null || outpoints.Length == 0)
 				return;
 			var parameters = new List<object>();
 			parameters.Add(unlock);
 			var array = new JArray();
 			parameters.Add(array);
-			foreach (var outp in outpoints)
+			foreach(var outp in outpoints)
 			{
 				var obj = new JObject();
 				obj["txid"] = outp.Hash.ToString();
@@ -557,6 +629,54 @@ namespace NBitcoin.RPC
 				array.Add(obj);
 			}
 			await SendCommandAsync("lockunspent", parameters.ToArray()).ConfigureAwait(false);
+		}
+
+		// walletpassphrase
+
+		/// <summary>
+		/// The walletpassphrase RPC stores the wallet decryption key in memory for the indicated number of seconds.Issuing the walletpassphrase command while the wallet is already unlocked will set a new unlock time that overrides the old one.
+		/// </summary>
+		/// <param name="passphrase">The passphrase</param>
+		/// <param name="timeout">Timeout in seconds</param>
+		public void WalletPassphrase(string passphrase, int timeout)
+		{
+			WalletPassphraseAsync(passphrase, timeout).GetAwaiter().GetResult();
+		}
+
+		/// <summary>
+		/// The walletpassphrase RPC stores the wallet decryption key in memory for the indicated number of seconds.Issuing the walletpassphrase command while the wallet is already unlocked will set a new unlock time that overrides the old one.
+		/// </summary>
+		/// <param name="passphrase">The passphrase</param>
+		/// <param name="timeout">Timeout in seconds</param>
+		public async Task WalletPassphraseAsync(string passphrase, int timeout)
+		{
+			var parameters = new List<object>();
+			parameters.Add(passphrase);
+			parameters.Add(timeout);
+			await SendCommandAsync("walletpassphrase", parameters.ToArray()).ConfigureAwait(false);
+		}
+	
+		/// <summary>
+		/// Sign a transaction
+		/// </summary>
+		/// <param name="tx">The transaction to be signed</param>
+		/// <returns>The signed transaction</returns>
+		public Transaction SignRawTransaction(Transaction tx)
+		{
+			if(tx == null)
+				throw new ArgumentNullException("tx");
+			return SignRawTransactionAsync(tx).GetAwaiter().GetResult();
+		}
+
+		/// <summary>
+		/// Sign a transaction
+		/// </summary>
+		/// <param name="tx">The transaction to be signed</param>
+		/// <returns>The signed transaction</returns>
+		public async Task<Transaction> SignRawTransactionAsync(Transaction tx)
+		{
+			var result = await SendCommandAsync(RPCOperations.signrawtransaction, tx.ToHex()).ConfigureAwait(false);
+			return new Transaction(result.Result["hex"].Value<string>());
 		}
 	}
 }

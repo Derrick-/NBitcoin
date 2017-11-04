@@ -1,8 +1,8 @@
 # NBitcoin
 
 [![Join the chat at https://gitter.im/MetacoSA/NBitcoin](https://badges.gitter.im/MetacoSA/NBitcoin.svg)](https://gitter.im/MetacoSA/NBitcoin?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
-
-<img src="http://segwit.co/static/public/images/logo.png" width="100">
+[![Build status](https://ci.appveyor.com/api/projects/status/6xq0yg942jatra0x?svg=true)](https://ci.appveyor.com/project/NicolasDorier/nbitcoin)
+<img src="http://segwit.co/static/public/images/logo.png" width="100"> [![NuGet](https://img.shields.io/nuget/v/NBitcoin.svg)](https://www.nuget.org/packages/NBitcoin)
 
 NBitcoin is the most complete Bitcoin library for the .NET platform. It implements all most relevant Bitcoin Improvement Proposals (BIPs). It provides also low level access to Bitcoin primitives so you can easily build your application on top of it. Join us on our [gitter chat room](https://gitter.im/MetacoSA/NBitcoin).
 It works on Windows, Mac and Linux with Xamarin, Unity, .NET Core or CLR. (Porting to Unity should not be that hard if you need it)
@@ -23,7 +23,17 @@ The packages supports:
 To compile it by yourself, you can git clone, open the project and hit the compile button on visual studio.
 How to get started ? Check out this article [on CodeProject](http://www.codeproject.com/Articles/768412/NBitcoin-The-most-complete-Bitcoin-port-Part-Crypt) for some basic Bitcoin operations, or [this Introduction to NBitcoin video](https://www.youtube.com/watch?v=X4ZwRWIF49w).
 
-# For using NBitcoin in Unity 3.5
+# How to use with Litecoin ?
+
+>**Install-Package NBitcoin.Litecoin** 
+
+This is a light weight package with corresponding `Network` instances for Litecoin mainnet and testnet. [Sources](https://github.com/MetacoSA/NBitcoin.Litecoin)
+
+# How to use with my own blockchain?
+
+ If your crypto currency is similar enough to Bitcoin, please, check out how we integrated [litecoin to NBitcoin](https://github.com/MetacoSA/NBitcoin.Litecoin).
+
+# How to use in Unity 3.5
 
 In command prompt:
 
@@ -35,6 +45,41 @@ build-unity.bat
 ```
 
 Then put the two libraries, NBitcoin.dll and System.Threading.Tasks.Net35.dll found in "NBitcoin\NBitcoin\bin\Release" into your asset folder.
+
+# How to use in .NET Core
+
+If you want to use .NET Core, first install .NET Core [as documented here](https://www.microsoft.com/net/core#windowsvs2017).
+
+Then:
+```
+mkdir MyProject
+cd MyProject
+dotnet new console
+dotnet add package NBitcoin
+dotnet restore
+```
+Then edit your Program.cs:
+```
+using System;
+using NBitcoin;
+
+namespace _125350929
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            Console.WriteLine("Hello World! " + new Key().GetWif(Network.Main));
+        }
+    }
+}
+```
+You can then run with
+```
+dotnet run
+```
+
+We advice you to use [Visual Studio Code](https://code.visualstudio.com/) as the editor for your project.
 
 ## Description
 NBitcoin notably includes:
@@ -49,6 +94,7 @@ NBitcoin notably includes:
 * The signing and verification with private keys (with support for compact signatures) for proving ownership
 * Bloom filters and partial merkle trees
 * Segregated Witness ([BIP 141](https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki), [BIP 143](https://github.com/bitcoin/bips/blob/master/bip-0143.mediawiki), [BIP 144](https://github.com/bitcoin/bips/blob/master/bip-0144.mediawiki))
+* Bech32 segwit address implementation with error detection [BIP 173](https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki)
 * Mnemonic code for generating deterministic keys ([BIP 39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki)), credits to [Thasshiznets](https://github.com/Thashiznets/BIP39.NET)
 * Hierarchical Deterministic Wallets ([BIP 32](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki))
 * Payment Protocol ([BIP 70](https://github.com/bitcoin/bips/blob/master/bip-0070.mediawiki))

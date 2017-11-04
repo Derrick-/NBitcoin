@@ -1,4 +1,5 @@
-﻿using NBitcoin.DataEncoders;
+﻿#if !NOSOCKET
+using NBitcoin.DataEncoders;
 using NBitcoin.Protocol;
 using NBitcoin.RPC;
 using System;
@@ -8,11 +9,13 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Collections;
 
 namespace NBitcoin.Tests
 {
@@ -23,15 +26,32 @@ namespace NBitcoin.Tests
 		Running,
 		Killed
 	}
-	public class NodeConfigParameters : Dictionary<string, string>
+	public class NodeConfigParameters : IEnumerable<KeyValuePair<string,string>>
 	{
 		public void Import(NodeConfigParameters configParameters)
 		{
+			var toAdd = new List<KeyValuePair<string, string>>();
 			foreach(var kv in configParameters)
 			{
 				if(!ContainsKey(kv.Key))
-					Add(kv.Key, kv.Value);
+					toAdd.Add(new KeyValuePair<string, string>(kv.Key, kv.Value));
 			}
+
+			foreach(var add in toAdd)
+			{
+				Add(add.Key, add.Value);
+			}
+		}
+
+		public bool ContainsKey(string key)
+		{
+			return _KValues.Any(k => k.Key == key);
+		}
+
+		List<KeyValuePair<string, string>> _KValues = new List<KeyValuePair<string, string>>();
+		public void Add(string key, string value)
+		{
+			_KValues.Add(new KeyValuePair<string, string>(key, value));
 		}
 
 		public override string ToString()
@@ -40,6 +60,16 @@ namespace NBitcoin.Tests
 			foreach(var kv in this)
 				builder.AppendLine(kv.Key + "=" + kv.Value);
 			return builder.ToString();
+		}
+
+		public IEnumerator<KeyValuePair<string, string>> GetEnumerator()
+		{
+			return _KValues.GetEnumerator();
+		}
+
+		IEnumerator IEnumerable.GetEnumerator()
+		{
+			return GetEnumerator();
 		}
 	}
 	public class NodeBuilder : IDisposable
@@ -72,9 +102,20 @@ namespace NBitcoin.Tests
 				return bitcoind;
 			var zip = String.Format("bitcoin-{0}-win32.zip", version);
 			string url = String.Format("https://bitcoin.org/bin/bitcoin-core-{0}/" + zip, version);
-			WebClient client = new WebClient();
-			client.DownloadFile(url, zip);
-			ZipFile.ExtractToDirectory(zip, new FileInfo(zip).Directory.FullName);
+
+			HttpClient client = new HttpClient();
+			client.Timeout = TimeSpan.FromMinutes(5.0);
+			var bytes = client.GetByteArrayAsync(url).GetAwaiter().GetResult();
+			File.WriteAllBytes(zip, bytes);
+
+			try
+			{
+				ZipFile.ExtractToDirectory(zip, new FileInfo(zip).Directory.FullName);
+			}
+			catch(IOException)
+			{
+				//The file probably already exist, continue
+			}
 			return bitcoind;
 		}
 
@@ -256,7 +297,7 @@ namespace NBitcoin.Tests
 		readonly NetworkCredential creds;
 		public RPCClient CreateRPCClient()
 		{
-			return new RPCClient(creds, new Uri("http://127.0.0.1:" + ports[1].ToString() + "/"), Network.RegTest);
+			return new RPCClient(GetRPCAuth(), new Uri("http://127.0.0.1:" + ports[1].ToString() + "/"), Network.RegTest);
 		}
 
 		public RestClient CreateRESTClient()
@@ -274,6 +315,14 @@ namespace NBitcoin.Tests
 		}
 #endif
 
+		string GetRPCAuth()
+		{
+			if(!CookieAuth)
+				return creds.UserName + ":" + creds.Password;
+			else
+				return "cookiefile=" + Path.Combine(dataDir, "regtest", ".cookie");
+		}
+
 		public async Task StartAsync()
 		{
 			NodeConfigParameters config = new NodeConfigParameters();
@@ -281,8 +330,11 @@ namespace NBitcoin.Tests
 			config.Add("rest", "1");
 			config.Add("server", "1");
 			config.Add("txindex", "1");
-			config.Add("rpcuser", creds.UserName);
-			config.Add("rpcpassword", creds.Password);
+			if(!CookieAuth)
+			{
+				config.Add("rpcuser", creds.UserName);
+				config.Add("rpcpassword", creds.Password);
+			}
 			config.Add("port", ports[0].ToString());
 			config.Add("rpcport", ports[1].ToString());
 			config.Add("printtoconsole", "1");
@@ -290,6 +342,11 @@ namespace NBitcoin.Tests
 			config.Add("whitebind", "127.0.0.1:" + ports[0].ToString());
 			config.Import(ConfigParameters);
 			File.WriteAllText(_Config, config.ToString());
+			await Run();
+		}
+
+		private async Task Run()
+		{
 			lock(l)
 			{
 				_Process = Process.Start(new FileInfo(this._Builder.BitcoinD).FullName, "-conf=bitcoin.conf" + " -datadir=" + dataDir + " -debug=net");
@@ -309,6 +366,11 @@ namespace NBitcoin.Tests
 			}
 		}
 
+		public void Restart()
+		{
+			Kill(false);
+			Run().GetAwaiter().GetResult();
+		}
 
 
 		Process _Process;
@@ -446,6 +508,11 @@ namespace NBitcoin.Tests
 			get;
 			private set;
 		}
+		public bool CookieAuth
+		{
+			get;
+			internal set;
+		}
 
 		public Block[] Generate(int blockCount, bool includeUnbroadcasted = true, bool broadcast = true)
 		{
@@ -479,7 +546,7 @@ namespace NBitcoin.Tests
 						transactions.Clear();
 					}
 					block.UpdateMerkleRoot();
-					while(!block.CheckProofOfWork())
+					while(!block.CheckProofOfWork(node.Network.Consensus))
 						block.Header.Nonce = ++nonce;
 					blocks.Add(block);
 					chain.SetTip(block.Header);
@@ -580,3 +647,4 @@ namespace NBitcoin.Tests
 		}
 	}
 }
+#endif

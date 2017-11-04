@@ -273,11 +273,21 @@ namespace NBitcoin
 				return pindexLast.Header.Bits;
 			}
 
-			// Go back by what we want to be 14 days worth of blocks
-			var pastHeight = pindexLast.Height - (consensus.DifficultyAdjustmentInterval - 1);
+			long pastHeight = 0;
+			if(consensus.LitecoinWorkCalculation)
+			{
+				long blockstogoback = consensus.DifficultyAdjustmentInterval - 1;
+				if((pindexLast.Height + 1) != consensus.DifficultyAdjustmentInterval)
+					blockstogoback = consensus.DifficultyAdjustmentInterval;
+				pastHeight = pindexLast.Height - blockstogoback;
+			}
+			else
+			{
+				// Go back by what we want to be 14 days worth of blocks
+				pastHeight = pindexLast.Height - (consensus.DifficultyAdjustmentInterval - 1);
+			}
 			ChainedBlock pindexFirst = this.EnumerateToGenesis().FirstOrDefault(o => o.Height == pastHeight);
 			assert(pindexFirst);
-
 			if(consensus.PowNoRetargeting)
 				return pindexLast.header.Bits;
 
@@ -330,14 +340,26 @@ namespace NBitcoin
 		{
 			if(network == null)
 				throw new ArgumentNullException("network");
+			var genesisCorrect = Height != 0 || HashBlock == network.GetGenesis().GetHash();
+			return genesisCorrect && Validate(network.Consensus);
+		}
+
+		/// <summary>
+		/// Check PoW and that the blocks connect correctly
+		/// </summary>
+		/// <param name="consensus">The consensus being used</param>
+		/// <returns>True if PoW is correct</returns>
+		public bool Validate(Consensus consensus)
+		{
+			if(consensus == null)
+				throw new ArgumentNullException("consensus");
 			if(Height != 0 && Previous == null)
 				return false;
 			var heightCorrect = Height == 0 || Height == Previous.Height + 1;
-			var genesisCorrect = Height != 0 || HashBlock == network.GetGenesis().GetHash();
 			var hashPrevCorrect = Height == 0 || Header.HashPrevBlock == Previous.HashBlock;
 			var hashCorrect = HashBlock == Header.GetHash();
-			var workCorrect = CheckProofOfWorkAndTarget(network);
-			return heightCorrect && genesisCorrect && hashPrevCorrect && hashCorrect && workCorrect;
+			var workCorrect = CheckProofOfWorkAndTarget(consensus);
+			return heightCorrect && hashPrevCorrect && hashCorrect && workCorrect;
 		}
 
 		public bool CheckProofOfWorkAndTarget(Network network)
@@ -347,7 +369,7 @@ namespace NBitcoin
 
 		public bool CheckProofOfWorkAndTarget(Consensus consensus)
 		{
-			return Height == 0 || (Header.CheckProofOfWork() && Header.Bits <= GetWorkRequired(consensus));
+			return Height == 0 || (Header.CheckProofOfWork(consensus) && Header.Bits == GetWorkRequired(consensus));
 		}
 
 

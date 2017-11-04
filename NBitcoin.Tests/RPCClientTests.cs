@@ -11,6 +11,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
+using Xunit.Sdk;
 
 namespace NBitcoin.Tests
 {
@@ -45,6 +46,41 @@ namespace NBitcoin.Tests
 				builder.StartAll();
 				var response = rpc.SendCommand(RPCOperations.getinfo);
 				Assert.NotNull(response.Result);
+				var copy = RPCCredentialString.Parse(rpc.CredentialString.ToString());
+				copy.Server = rpc.Address.AbsoluteUri;
+				rpc = new RPCClient(copy, null as string, Network.RegTest);
+				response = rpc.SendCommand(RPCOperations.getinfo);
+				Assert.NotNull(response.Result);
+			}
+		}
+
+		[Fact]
+		public void CanUseMultipleWallets()
+		{
+			using(var builder = NodeBuilder.Create(version: "0.15.0"))
+			{
+				var node = builder.CreateNode();
+				node.ConfigParameters.Add("wallet", "w1");
+				//node.ConfigParameters.Add("wallet", "w2");
+				node.Start();
+				var rpc = node.CreateRPCClient();
+				var creds = RPCCredentialString.Parse(rpc.CredentialString.ToString());
+				creds.Server = rpc.Address.AbsoluteUri;
+				creds.WalletName = "w1";
+				rpc = new RPCClient(creds, Network.RegTest);
+				rpc.SendCommandAsync(RPCOperations.getwalletinfo).GetAwaiter().GetResult().ThrowIfError();
+				Assert.NotNull(rpc.GetBalance());
+				Assert.NotNull(rpc.GetBestBlockHash());
+				var block = rpc.GetBlock(rpc.Generate(1)[0]);
+
+				rpc = rpc.PrepareBatch();
+				var b = rpc.GetBalanceAsync();
+				var b2 = rpc.GetBestBlockHashAsync();
+				var a = rpc.SendCommandAsync("gettransaction", block.Transactions.First().GetHash().ToString());
+				rpc.SendBatch();
+				b.GetAwaiter().GetResult();
+				b2.GetAwaiter().GetResult();
+				a.GetAwaiter().GetResult();
 			}
 		}
 
@@ -93,6 +129,24 @@ namespace NBitcoin.Tests
 		}
 
 		[Fact]
+		public void CanSignRawTransaction()
+		{
+			using(var builder = NodeBuilder.Create())
+			{
+				var node = builder.CreateNode();
+				var rpc = node.CreateRPCClient();
+				builder.StartAll();
+				node.CreateRPCClient().Generate(101);
+
+				var tx = new Transaction();
+				tx.Outputs.Add(new TxOut(Money.Coins(1.0m), new Key()));
+				var funded = node.CreateRPCClient().FundRawTransaction(tx);
+				var signed = node.CreateRPCClient().SignRawTransaction(funded.Transaction);
+				node.CreateRPCClient().SendRawTransaction(signed);
+			}
+		}
+
+		[Fact]
 		public void CanGetBlockFromRPC()
 		{
 			using(var builder = NodeBuilder.Create())
@@ -117,6 +171,8 @@ namespace NBitcoin.Tests
 				node.Generate(101);
 				var rpc = node.CreateRPCClient();
 				Assert.Throws<NoEstimationException>(() => rpc.EstimateFeeRate(1));
+				Assert.Equal(Money.Coins(50m), rpc.GetBalance(1, false));
+				Assert.Equal(Money.Coins(50m), rpc.GetBalance());
 			}
 		}
 
@@ -154,6 +210,7 @@ namespace NBitcoin.Tests
 				var result1 = result;
 
 				var change = rpc.GetNewAddress();
+				var change2 = rpc.GetRawChangeAddress();
 				result = rpc.FundRawTransaction(tx, new FundRawTransactionOptions()
 				{
 					FeeRate = new FeeRate(Money.Satoshis(50), 1),
@@ -207,6 +264,28 @@ namespace NBitcoin.Tests
 		}
 
 		[Fact]
+		public void CanGetPrivateKeysFromLockedAccount()
+		{
+			using(var builder = NodeBuilder.Create())
+			{
+				var rpc = builder.CreateNode().CreateRPCClient();
+				builder.StartAll();
+				Key key = new Key();
+				var passphrase = "password1234";
+				rpc.SendCommand("encryptwallet", passphrase);
+				builder.Nodes[0].Restart();
+				rpc.ImportAddress(key.PubKey.GetAddress(Network.RegTest), TestAccount, false);
+				BitcoinAddress address = rpc.GetAccountAddress(TestAccount);
+				rpc.WalletPassphrase(passphrase, 60);
+				BitcoinSecret secret = rpc.DumpPrivKey(address);
+				BitcoinSecret secret2 = rpc.GetAccountSecret(TestAccount);
+
+				Assert.Equal(secret.ToString(), secret2.ToString());
+				Assert.Equal(address.ToString(), secret.GetAddress().ToString());
+			}
+		}
+
+		[Fact]
 		public void CanDecodeAndEncodeRawTransaction()
 		{
 			var a = new Protocol.AddressManager().Select();
@@ -241,7 +320,7 @@ namespace NBitcoin.Tests
 	""spendable"" : false
 }";
 			var testData = JObject.Parse(testJson);
-			var unspentCoin = new UnspentCoin(testData);
+			var unspentCoin = new UnspentCoin(testData, Network.TestNet);
 
 			Assert.Equal("test label", unspentCoin.Account);
 			Assert.False(unspentCoin.IsSpendable);
@@ -262,7 +341,7 @@ namespace NBitcoin.Tests
 	""confirmations"" : 6210
 }";
 			var testData = JObject.Parse(testJson);
-			var unspentCoin = new UnspentCoin(testData);
+			var unspentCoin = new UnspentCoin(testData, Network.TestNet);
 
 			// Versions prior to 0.10.0 were always spendable (but had no JSON field)
 			Assert.True(unspentCoin.IsSpendable);
@@ -284,7 +363,7 @@ namespace NBitcoin.Tests
 	""spendable"" : true
 }";
 			var testData = JObject.Parse(testJson);
-			var unspentCoin = new UnspentCoin(testData);
+			var unspentCoin = new UnspentCoin(testData, Network.TestNet);
 
 			Console.WriteLine("Redeem Script: {0}", unspentCoin.RedeemScript);
 			Assert.NotNull(unspentCoin.RedeemScript);
@@ -301,6 +380,59 @@ namespace NBitcoin.Tests
 
 				var tx2 = rpc.DecodeRawTransaction(tx.ToBytes());
 				AssertJsonEquals(tx.ToString(RawFormat.Satoshi), tx2.ToString(RawFormat.Satoshi));
+			}
+		}
+		[Fact]
+		public void CanUseBatchedRequests()
+		{
+			using(var builder = NodeBuilder.Create())
+			{
+				var nodeA = builder.CreateNode();
+				builder.StartAll();
+				var rpc = nodeA.CreateRPCClient();
+				var blocks = rpc.Generate(10);
+				Assert.Throws<InvalidOperationException>(() => rpc.SendBatch());
+				rpc = rpc.PrepareBatch();
+				List<Task<uint256>> requests = new List<Task<uint256>>();
+				for(int i = 1; i < 11; i++)
+				{
+					requests.Add(rpc.GetBlockHashAsync(i));
+				}
+				Thread.Sleep(1000);
+				foreach(var req in requests)
+				{
+					Assert.Equal(TaskStatus.WaitingForActivation, req.Status);
+				}
+				rpc.SendBatch();
+				rpc = rpc.PrepareBatch();
+				int blockIndex = 0;
+				foreach(var req in requests)
+				{
+					Assert.Equal(blocks[blockIndex], req.Result);
+					Assert.Equal(TaskStatus.RanToCompletion, req.Status);
+					blockIndex++;
+				}
+				requests.Clear();
+
+				requests.Add(rpc.GetBlockHashAsync(10));
+				requests.Add(rpc.GetBlockHashAsync(11));
+				requests.Add(rpc.GetBlockHashAsync(9));
+				requests.Add(rpc.GetBlockHashAsync(8));
+				rpc.SendBatch();
+				rpc = rpc.PrepareBatch();
+				Assert.Equal(TaskStatus.RanToCompletion, requests[0].Status);
+				Assert.Equal(TaskStatus.Faulted, requests[1].Status);
+				Assert.Equal(TaskStatus.RanToCompletion, requests[2].Status);
+				Assert.Equal(TaskStatus.RanToCompletion, requests[3].Status);
+				requests.Clear();
+
+				requests.Add(rpc.GetBlockHashAsync(10));
+				requests.Add(rpc.GetBlockHashAsync(11));
+				rpc.CancelBatch();
+				rpc = rpc.PrepareBatch();
+				Thread.Sleep(100);
+				Assert.Equal(TaskStatus.Canceled, requests[0].Status);
+				Assert.Equal(TaskStatus.Canceled, requests[1].Status);
 			}
 		}
 
@@ -349,13 +481,44 @@ namespace NBitcoin.Tests
 		[Fact]
 		public void CanAuthWithCookieFile()
 		{
-			var rpc = new RPCClient("cookiefile=Data\\.cookie", new Uri("http://localhost/"), Network.RegTest);
-			Assert.Throws<ArgumentException>(() => new RPCClient("cookiefile=Data\\tx_valid.json", new Uri("http://localhost/"), Network.RegTest));
-			Assert.Throws<FileNotFoundException>(() => new RPCClient("cookiefile=Data\\efpwwie.json", new Uri("http://localhost/"), Network.RegTest));
-			rpc = new RPCClient("bla:bla", null as Uri, Network.RegTest);
-			Assert.Equal("http://127.0.0.1:" + Network.RegTest.RPCPort + "/", rpc.Address.AbsoluteUri);
+#if NOFILEIO
+			Assert.Throws<NotSupportedException>(() => new RPCClient(Network.Main));
+#else
+			using(var builder = NodeBuilder.Create())
+			{
+				//Sanity check that it does not throw
+#pragma warning disable CS0618
+				new RPCClient(new NetworkCredential("toto", "tata:blah"), "localhost:10393", Network.Main);
 
-			rpc = new RPCClient("bla:bla", "http://toto/", Network.RegTest);
+				var node = builder.CreateNode();
+				node.CookieAuth = true;
+				node.Start();
+				var rpc = node.CreateRPCClient();
+				rpc.GetBlockCount();
+				node.Restart();
+				rpc.GetBlockCount();
+				Assert.Throws<ArgumentException>(() => new RPCClient("cookiefile=Data\\tx_valid.json", new Uri("http://localhost/"), Network.RegTest));
+				Assert.Throws<FileNotFoundException>(() => new RPCClient("cookiefile=Data\\efpwwie.json", new Uri("http://localhost/"), Network.RegTest));
+
+				rpc = new RPCClient("bla:bla", null as Uri, Network.RegTest);
+				Assert.Equal("http://127.0.0.1:" + Network.RegTest.RPCPort + "/", rpc.Address.AbsoluteUri);
+
+				rpc = node.CreateRPCClient();
+				rpc = rpc.PrepareBatch();
+				var blockCountAsync = rpc.GetBlockCountAsync();
+				rpc.SendBatch();
+				var blockCount = blockCountAsync.GetAwaiter().GetResult();
+
+				node.Restart();
+
+				rpc = rpc.PrepareBatch();
+				blockCountAsync = rpc.GetBlockCountAsync();
+				rpc.SendBatch();
+				blockCount = blockCountAsync.GetAwaiter().GetResult();
+
+				rpc = new RPCClient("bla:bla", "http://toto/", Network.RegTest);
+			}
+#endif
 		}
 
 
@@ -383,7 +546,7 @@ namespace NBitcoin.Tests
 			}
 		}
 
-		[Fact]
+		//[Fact]
 		public void CanAddNodes()
 		{
 			using(var builder = NodeBuilder.Create())
@@ -394,10 +557,14 @@ namespace NBitcoin.Tests
 				var rpc = nodeA.CreateRPCClient();
 				rpc.RemoveNode(nodeA.Endpoint);
 				rpc.AddNode(nodeB.Endpoint);
-				Thread.Sleep(500);
-				var info = rpc.GetAddedNodeInfo(true);
-				Assert.NotNull(info);
-				Assert.NotEmpty(info);
+
+				AddedNodeInfo[] info = null;
+				WaitAssert(() =>
+				{
+					info = rpc.GetAddedNodeInfo(true);
+					Assert.NotNull(info);
+					Assert.NotEmpty(info);
+				});
 				//For some reason this one does not pass anymore in 0.13.1
 				//Assert.Equal(nodeB.Endpoint, info.First().Addresses.First().Address);
 				var oneInfo = rpc.GetAddedNodeInfo(true, nodeB.Endpoint);
@@ -406,9 +573,30 @@ namespace NBitcoin.Tests
 				oneInfo = rpc.GetAddedNodeInfo(true, nodeA.Endpoint);
 				Assert.Null(oneInfo);
 				rpc.RemoveNode(nodeB.Endpoint);
-				Thread.Sleep(500);
-				info = rpc.GetAddedNodeInfo(true);
-				Assert.Equal(0, info.Count());
+
+				WaitAssert(() =>
+				{
+					info = rpc.GetAddedNodeInfo(true);
+					Assert.Equal(0, info.Count());
+				});
+			}
+		}
+
+		void WaitAssert(Action act)
+		{
+			int totalTry = 30;
+			while(totalTry > 0)
+			{
+				try
+				{
+					act();
+					return;
+				}
+				catch(AssertActualExpectedException)
+				{
+					Thread.Sleep(100);
+					totalTry--;
+				}
 			}
 		}
 #endif
